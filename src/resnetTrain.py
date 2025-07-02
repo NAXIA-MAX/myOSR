@@ -39,20 +39,34 @@ class NPYDatasetWithAugment(Dataset):
             image_tensor = transforms.ToTensor()(image_pil)
 
         return image_tensor, label
-#transform增强图像
-train_transform = transforms.Compose([
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(15),  # 随机旋转 ±15 度
-    transforms.ToTensor(),#转换为张量
-    transforms.Normalize(mean=[0.5], std=[0.5])  
-])
+    
+# 自定义高斯噪声类
+class AddGaussianNoise(object):
+    def __init__(self, mean=0.0, std=0.1):
+        self.mean = mean
+        self.std = std
 
-test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
+    def __call__(self, tensor):
+        noise = torch.randn_like(tensor) * self.std + self.mean
+        return torch.clamp(tensor + noise, 0., 1.)  # 保证范围在[0,1]
 
-def creatDataLoaderNPY(trainData,testData,trainLabels,testLabels):
+    def __repr__(self):
+        return self.__class__.__name__ + f'(mean={self.mean}, std={self.std})'
+    
+def setTransform(useAugment=False,useNoise=False,noisemean=0.0,noiseStd=0.1):
+    transform_list = []
+    if useAugment:
+        transform_list.append(transforms.RandomHorizontalFlip())
+        transform_list.append(transforms.RandomRotation(15))
+    transform_list.append(transforms.ToTensor())
+
+    if useAugment and useNoise:
+        transform_list.append(AddGaussianNoise(mean=noisemean, std=noiseStd))
+
+    transform_list.append(transforms.Normalize(mean=[0.5], std=[0.5]))
+    return transforms.Compose(transform_list)
+
+def creatDataLoaderNPY(trainData,testData,trainLabels,testLabels,train_transform,test_transform):
     #数据预处理
     train_dataset = NPYDatasetWithAugment(trainData, trainLabels, transform=train_transform)
     test_dataset = NPYDatasetWithAugment(testData, testLabels, transform=test_transform)
@@ -92,7 +106,9 @@ def main():
 
     model_name = "resnet20"#模型名称
     numClasses = 6        #训练种类数
-    inputChannel = 1       #输入通道数
+    inputChannel = 1      #输入通道数
+    useNoiseAug=True      #使用噪声增强
+    NoiseStd=0.1
     savepthHead="trainedPth/"
     data=np.load("ID_OODdata/IDimages_0_5.npy")
     labels=np.load("ID_OODdata/IDlabels_0_5.npy")
@@ -100,8 +116,9 @@ def main():
     trainData, testData, trainLabels, testLabels = train_test_split(
         data,labels , test_size=0.2, random_state=42, stratify=labels
     )
-
-    train_loader, test_loader = creatDataLoaderNPY(trainData, testData, trainLabels, testLabels)
+    train_transform=setTransform(useAugment=True,useNoise=useNoiseAug,NoiseStd=NoiseStd)
+    test_transform=setTransform(useAugment=False)
+    train_loader, test_loader = creatDataLoaderNPY(trainData, testData, trainLabels, testLabels,train_transform,test_transform)
     models = resnet.build_resnet(model_name, numClasses)
 
     if inputChannel != 3:
@@ -116,7 +133,11 @@ def main():
 
     epochs = 50
     best_acc = 0.0
-    save_path = f"{savepthHead}{model_name}_best_{numClasses}.pth"
+    if useNoiseAug:
+        withNoise=f"useNoiseAug_{NoiseStd}"
+    else :
+        withNoise="None"
+    save_path = f"{savepthHead}{model_name}_best_{numClasses}_{withNoise}.pth"
     if not os.path.exists(savepthHead):
         raise FileNotFoundError(f"路径不存在: {savepthHead}")
     for epoch in range(epochs):
