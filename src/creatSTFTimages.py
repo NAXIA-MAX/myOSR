@@ -139,7 +139,7 @@ def getWelchImage(data, s_sampling_freq_hz, Nfft=2048, window_type='hann', npers
     return fft_image
 
 #4类图像预处理
-def imageProcess(data_array,s,target_shape):
+def imageProcess(data_array,s,target_shape,channel):
      #做STFT变换
     _,_,Z=signal.stft(data_array,s.samplingFreq/1e6,window='hann',nperseg=2048,noverlap=1024)
     real_Zxx = 10 * np.log10(np.abs(Z))
@@ -159,11 +159,20 @@ def imageProcess(data_array,s,target_shape):
     timeHistogram_uint8=exposure.rescale_intensity(timeHistogram_shape, out_range=(0, 255)).astype(np.uint8)
     fftImage_uint8=exposure.rescale_intensity(fftImage_shape, out_range=(0, 255)).astype(np.uint8)
     I_skimage_uint8 = exposure.rescale_intensity(I_skimage, out_range=(0, 255)).astype(np.uint8)
-    #图像拼接
-    combined_image1 = np.hstack((fftImage_uint8, I_skimage_uint8))
-    combined_image2 = np.hstack((reImage_uint8, timeHistogram_uint8))
-    combined_image = np.vstack((combined_image1, combined_image2))
-    combined_image=skimage_resize(combined_image, target_shape, order=3, anti_aliasing=True, preserve_range=True)
+    match channel:
+        case 1:
+            #图像拼接
+            combined_image1 = np.hstack((fftImage_uint8, I_skimage_uint8))
+            combined_image2 = np.hstack((reImage_uint8, timeHistogram_uint8))
+            combined_image = np.vstack((combined_image1, combined_image2))
+            combined_image=skimage_resize(combined_image, target_shape, order=3, anti_aliasing=True, preserve_range=True)
+        case 3:
+            # 拼接为 (C, H, W)
+            combined_image = np.stack([fftImage_uint8, I_skimage_uint8, reImage_uint8], axis=0)
+        case 4:
+            combined_image = np.stack([fftImage_uint8, I_skimage_uint8, reImage_uint8,timeHistogram_uint8], axis=0)
+        case _:
+            raise ValueError(f"无效的 channel: {channel}")
     return combined_image
 
 def in_outFilename(dataType):
@@ -204,20 +213,20 @@ def main(skipnum,dataType):
     
     # --- 参数设定 ---
     #file_path = "/mnt/hgfs/winShare/05-29-20222027_000_unp_2.bin"  
-    savePath="/home/naixa/LINUX/OSR/imagetest/"
     #interfType="SCW(1.023)"                #干扰类型
     file_path,interfType=in_outFilename(dataType)
     target_dtype = np.int8         # 目标数据类型 
     data_len     =10               #用多少ms数据做STFT
-    #skipnum      =10               #跳过的数据长度(s),跳过的数据长度最好选择10，40……
-    nImages      =250             #生成的stft图片数,1000对应10s，每一个数据ISR变化间隔30s
+    #skipnum      =10              #跳过的数据长度(s),跳过的数据长度最好选择10，40……
+    nImages      =250              #生成的stft图片数,1000对应10s，每一个数据ISR变化间隔30s
     target_shape=(224,224)         #裁切的大小
+    numofChannel=3                 #生成图片的通道维数
+    savePath=f"/home/naixa/LINUX/OSR/imageSet_{numofChannel}/"
+    os.makedirs(savePath, exist_ok=True)
     # ----------------
     ISR=int(skipnum/30)*10-20
     savename=f"{interfType}_{ISR}"
     s=settings()
-    # 如果路径不存在则创建
-    os.makedirs(savePath, exist_ok=True)
     samplesPerCode=round(s.samplingFreq/(s.codeFreqBasis/s.codeLength))
     if target_dtype==np.uint8:
         dataBlockLen=int(data_len/2*samplesPerCode)
@@ -239,7 +248,7 @@ def main(skipnum,dataType):
                 # --- 读取二进制文件 ---
                     data_array = np.array([], dtype=target_dtype) # 初始化为空，以防文件打不开或读取失败
                     data_array = np.fromfile(f, dtype=target_dtype, count=dataBlockLen)
-                    combined_image=imageProcess(data_array,s,target_shape)
+                    combined_image=imageProcess(data_array,s,target_shape,numofChannel)
                     # plt.imshow(combined_image,'gray')
                     # plt.savefig('fft.png',dpi=400)
                     # exit(0)
@@ -276,6 +285,7 @@ def threadProcess(skipnumList,dataType):
     
 if __name__ == '__main__':
     dataType=int(sys.argv[1])
+    #skipnumList=[10]
     skipnumList=[10 ,40 ,70 ,100, 130 ,160 ,190 ,220]
     start_time = datetime.now()
     print(f"开始时间: {start_time}")
