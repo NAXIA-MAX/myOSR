@@ -25,20 +25,34 @@ class NPYDatasetWithAugment(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        image = self.data[idx]  # shape: [H, W] or [1, H, W]
+        image = self.data[idx]  # shape: [H, W], [1, H, W], [3, H, W], etc.
         label = self.labels[idx]
-        # 保证 image 是 [H, W]
-        if image.ndim == 3 and image.shape[0] == 1:
-            image = np.squeeze(image, axis=0)  # [1, H, W] → [H, W]
-        image_pil =Image.fromarray(image) 
-        image_pil = image_pil.convert('L')  # 单通道灰度图
 
+        # 1. 单通道图像：可能是 [1, H, W] 或 [H, W]
+        if image.ndim == 2:
+            image_pil = Image.fromarray(image.astype(np.uint8)).convert('L')  # [H, W]
+        elif image.ndim == 3:
+            if image.shape[0] == 1:
+                # [1, H, W] → [H, W]
+                image = np.squeeze(image, axis=0)
+                image_pil = Image.fromarray(image.astype(np.uint8)).convert('L')
+            elif image.shape[0] == 3:
+                # [3, H, W] → [H, W, 3]
+                image = np.transpose(image, (1, 2, 0))
+                image_pil = Image.fromarray(image.astype(np.uint8)).convert('RGB')
+            else:
+                raise ValueError(f"Unsupported channel count (first dim): {image.shape[0]} at idx {idx}")
+        else:
+            raise ValueError(f"Unsupported image shape: {image.shape} at idx {idx}")
+
+        # 应用 transform
         if self.transform:
-            image_tensor = self.transform(image_pil)  
+            image_tensor = self.transform(image_pil)
         else:
             image_tensor = transforms.ToTensor()(image_pil)
 
         return image_tensor, label
+
     
 # 自定义高斯噪声类
 class AddGaussianNoise(object):
@@ -63,16 +77,20 @@ def setTransform(useAugment=False,useNoise=False,noisemean=0.0,noiseStd=0.1):
     if useAugment and useNoise:
         transform_list.append(AddGaussianNoise(mean=noisemean, std=noiseStd))
 
-    transform_list.append(transforms.Normalize(mean=[0.5], std=[0.5]))
+    transform_list.append(transforms.Normalize(mean=[0.558,0.537,0.886], std=[0.469,0.129,0.245]))#3通道的mean、std
     return transforms.Compose(transform_list)
 
-def creatDataLoaderNPY(trainData,testData,trainLabels,testLabels,train_transform,test_transform):
+def creatDataLoaderNPY(trainData, trainLabels, train_transform, 
+                       testData=None, testLabels=None, test_transform=None): 
     #数据预处理
     train_dataset = NPYDatasetWithAugment(trainData, trainLabels, transform=train_transform)
-    test_dataset = NPYDatasetWithAugment(testData, testLabels, transform=test_transform)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True) 
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True)
+    if testData is not None and testLabels is not None and test_transform is not None:
+        test_dataset = NPYDatasetWithAugment(testData, testLabels, transform=test_transform) 
+        test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True) 
+    else:
+        test_loader = None
 
     return train_loader,test_loader
 
@@ -105,20 +123,21 @@ def main():
     set_seed()
 
     model_name = "resnet20"#模型名称
-    numClasses = 6        #训练种类数
-    inputChannel = 1      #输入通道数
-    useNoiseAug=True      #使用噪声增强
-    NoiseStd=0.1
+    numClasses = 10        #训练种类数
+    inputChannel = 3      #输入通道数
+    useNoiseAug=False      #使用噪声增强
+    noiseStd=0.05
     savepthHead="trainedPth/"
-    data=np.load("ID_OODdata/IDimages_0_5.npy")
-    labels=np.load("ID_OODdata/IDlabels_0_5.npy")
+    addTailname="_jam20_40_50"
+    data=np.load("jammingData/data_3channel_20_40_50.npy")
+    labels=np.load("jammingData/labels_3channel_20_40_50.npy")
     # 划分训练测试集
     trainData, testData, trainLabels, testLabels = train_test_split(
         data,labels , test_size=0.2, random_state=42, stratify=labels
     )
-    train_transform=setTransform(useAugment=True,useNoise=useNoiseAug,NoiseStd=NoiseStd)
+    train_transform=setTransform(useAugment=True,useNoise=useNoiseAug,noiseStd=noiseStd)
     test_transform=setTransform(useAugment=False)
-    train_loader, test_loader = creatDataLoaderNPY(trainData, testData, trainLabels, testLabels,train_transform,test_transform)
+    train_loader, test_loader = creatDataLoaderNPY(trainData, trainLabels, train_transform,testData,testLabels,test_transform)
     models = resnet.build_resnet(model_name, numClasses)
 
     if inputChannel != 3:
@@ -133,11 +152,14 @@ def main():
 
     epochs = 50
     best_acc = 0.0
+    patience = 5
+    no_improve_count = 0
+    save_start_epoch = 30
     if useNoiseAug:
-        withNoise=f"useNoiseAug_{NoiseStd}"
+        withNoise=f"Noise_{noiseStd}"
     else :
         withNoise="None"
-    save_path = f"{savepthHead}{model_name}_best_{numClasses}_{withNoise}.pth"
+    save_path = f"{savepthHead}{model_name}_{inputChannel}channels_{numClasses}classes_{withNoise}{addTailname}.pth"
     if not os.path.exists(savepthHead):
         raise FileNotFoundError(f"路径不存在: {savepthHead}")
     for epoch in range(epochs):
@@ -201,14 +223,25 @@ def main():
         for param_group in optimizer.param_groups:
             print(f"Current learning rate: {param_group['lr']}")
 
-        if epoch_acc_val > best_acc:
-            best_acc = epoch_acc_val
-            torch.save(models.state_dict(), save_path)
-            print(f"模型已保存至 {save_path}，验证准确率: {best_acc:.4f}")
+        if epoch >= save_start_epoch:
+            if epoch_acc_val > best_acc:
+                best_acc = epoch_acc_val
+                no_improve_count = 0
+                torch.save(models.state_dict(), save_path)
+                print(f"模型已保存至 {save_path}，验证准确率: {best_acc:.4f}")
+            else:
+                no_improve_count += 1
+                print(f"验证准确率未提升，连续 {no_improve_count} 次")
+        else:
+            print(f"第 {epoch+1} 轮，尚未开始保存模型，未触发early stopping")
 
         print(f"Epoch [{epoch+1:02d}/{epochs}], "
-              f"训练损失: {epoch_loss_train:.4f}, 训练准确率: {epoch_acc_train:.4f} | "
-              f"验证损失: {epoch_loss_val:.4f}, 验证准确率: {epoch_acc_val:.4f}")
+            f"训练损失: {epoch_loss_train:.4f}, 训练准确率: {epoch_acc_train:.4f} | "
+            f"验证损失: {epoch_loss_val:.4f}, 验证准确率: {epoch_acc_val:.4f}")
+
+        if epoch >= save_start_epoch and no_improve_count >= patience:
+            print(f"验证准确率连续 {patience} 次未提升，提前停止训练。")
+            break
 
 if __name__ == "__main__":
     # 定义这些变量防止未定义报错
