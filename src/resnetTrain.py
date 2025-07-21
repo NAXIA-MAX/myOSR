@@ -128,9 +128,9 @@ def main():
     useNoiseAug=False      #使用噪声增强
     noiseStd=0.05
     savepthHead="trainedPth/"
-    addTailname="_jam20_40_50"
-    data=np.load("jammingData/data_3channel_20_40_50.npy")
-    labels=np.load("jammingData/labels_3channel_20_40_50.npy")
+    addTailname="_jam30_40_50"
+    data=np.load("jammingData/data_3channel_30_40_50.npy")
+    labels=np.load("jammingData/labels_3channel_30_40_50.npy")
     # 划分训练测试集
     trainData, testData, trainLabels, testLabels = train_test_split(
         data,labels , test_size=0.2, random_state=42, stratify=labels
@@ -156,7 +156,7 @@ def main():
     no_improve_count = 0
     save_start_epoch = 30
     if useNoiseAug:
-        withNoise=f"Noise_{noiseStd}"
+        withNoise=f"NoiseStd_{noiseStd}"
     else :
         withNoise="None"
     save_path = f"{savepthHead}{model_name}_{inputChannel}channels_{numClasses}classes_{withNoise}{addTailname}.pth"
