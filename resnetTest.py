@@ -35,9 +35,9 @@ model_name="resnet20" #模型名称
 numClasses=10         #训练种类数
 inputChannel=3
 modelPathhead="trainedPth/"
-modelPth="resnet20_3channels_10classes_None_jam30_40_50.pth"
-testData=np.load("/workspace/OSR/jammingData/data_3channel_30_40_50.npy")
-testLabels=np.load("/workspace/OSR/jammingData/labels_3channel_30_40_50.npy")
+modelPth="resnet20_3channels_10classes_None_10000.pth"
+testData=np.load("jammingData/3channels/data_3channel_10000.npy")
+testLabels=np.load("jammingData/3channels/labels_3channel_10000.npy")
 
 
 if inputChannel==3:
@@ -81,6 +81,7 @@ print(f"验证集准确率: {correct / total * 100:.2f}%")
 num_classes = len(filenameList)
 labels = np.arange(num_classes)  # [0, 1, ..., 9]
 cm = confusion_matrix(all_labels, all_preds, labels=labels)
+np.save(f"confusion_matrix_{modelPth}.npy", cm)
 # 创建混淆矩阵显示对象
 disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=filenameList)
 

@@ -129,8 +129,8 @@ def main(Tailname):
     noiseStd=0.05
     savepthHead="trainedPth/"
     #Tailname="_jam20_40_50"
-    data=np.load("jammingData/data_3channel_30_40_50.npy")
-    labels=np.load("jammingData/labels_3channel_30_40_50.npy")
+    data=np.load("jammingData/3channels/data_3channel_10000.npy")
+    labels=np.load("jammingData/3channels/labels_3channel_10000.npy")
     # 划分训练测试集
     trainData, testData, trainLabels, testLabels = train_test_split(
         data,labels , test_size=0.2, random_state=42, stratify=labels
